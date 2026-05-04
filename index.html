@@ -593,6 +593,85 @@
     box-shadow: 0 0 14px rgba(77, 208, 255, 0.4) !important;
   }
 
+  /* Email opt-in modal */
+  .modal-overlay {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(5, 12, 24, 0.85);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 1000;
+    padding: 20px;
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    animation: fadeIn 0.25s ease-out;
+  }
+  .modal-overlay.hidden { display: none; }
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+  .modal-card {
+    background: linear-gradient(180deg, #112240 0%, #0a1428 100%);
+    border: 2px solid rgba(77, 208, 255, 0.4);
+    border-radius: 14px;
+    padding: 28px 22px 22px;
+    width: 100%; max-width: 340px;
+    text-align: center;
+    box-shadow: 0 0 40px rgba(77, 208, 255, 0.2);
+    animation: slideUp 0.3s ease-out;
+  }
+  .modal-icon { font-size: 36px; margin-bottom: 8px; }
+  .modal-title {
+    color: #4dd0ff;
+    font-size: 14px;
+    font-weight: 900;
+    letter-spacing: 3px;
+    margin-bottom: 12px;
+  }
+  .modal-body {
+    color: rgba(220, 232, 245, 0.85);
+    font-size: 13px;
+    line-height: 1.6;
+    margin-bottom: 4px;
+  }
+  .modal-card .form-group { margin-bottom: 6px; }
+  .modal-card input {
+    width: 100%;
+    padding: 11px 14px;
+    background: rgba(0, 0, 0, 0.35);
+    border: 1.5px solid rgba(77, 208, 255, 0.3);
+    border-radius: 8px;
+    color: #fff;
+    font-family: inherit;
+    font-size: 13px;
+    text-align: center;
+  }
+  .modal-card input:focus {
+    outline: none;
+    border-color: #4dd0ff;
+    box-shadow: 0 0 0 3px rgba(77, 208, 255, 0.15);
+  }
+  .modal-buttons {
+    display: flex; gap: 8px;
+    margin-top: 14px;
+  }
+  .modal-buttons .btn {
+    flex: 1;
+    padding: 11px 14px !important;
+    font-size: 11px !important;
+    min-width: 0;
+  }
+  .modal-note {
+    color: rgba(180, 200, 220, 0.5);
+    font-size: 10px;
+    margin-top: 12px;
+    letter-spacing: 0.5px;
+  }
+  .modal-card .err {
+    color: #ff6b6b;
+    font-size: 11px;
+    margin-top: 6px;
+    min-height: 14px;
+  }
+
   /* Ship select */
   .ship-grid {
     display: flex; flex-direction: column;
@@ -730,14 +809,10 @@
     <div class="form-group">
       <label>PILOT CALLSIGN</label>
       <input id="su-name" type="text" maxlength="12" placeholder="ex. OLIVIA-S" autocomplete="off">
-    </div>
-    <div class="form-group">
-      <label>PILOT EMAIL</label>
-      <input id="su-email" type="email" placeholder="pilot@unis.org" autocomplete="email">
       <div class="err" id="su-err"></div>
     </div>
     <p class="privacy">
-      Used to save your score. Only your callsign appears on the leaderboard.
+      Choose any callsign — this is how you'll appear on the leaderboard.
     </p>
     <button class="btn" id="su-submit">⚡  ENLIST &amp; LAUNCH</button>
   </div>
@@ -810,6 +885,27 @@
       <button class="btn ghost" id="go-menu">MENU</button>
     </div>
     <button class="btn share-btn" id="go-share">📤  SHARE SCORE</button>
+  </div>
+
+  <!-- Email opt-in modal — appears 5s after first leaderboard view -->
+  <div id="email-modal" class="modal-overlay hidden">
+    <div class="modal-card">
+      <div class="modal-icon">📧</div>
+      <div class="modal-title">WEEKLY RANKINGS</div>
+      <div class="modal-body">
+        Want your weekly rank delivered to your inbox?<br>
+        We'll send a recap every Sunday once we have enough pilots.
+      </div>
+      <div class="form-group" style="margin-top:18px;">
+        <input id="em-input" type="email" placeholder="pilot@unis.org" autocomplete="email">
+        <div class="err" id="em-err"></div>
+      </div>
+      <div class="modal-buttons">
+        <button class="btn" id="em-submit">SUBSCRIBE</button>
+        <button class="btn ghost" id="em-skip">MAYBE LATER</button>
+      </div>
+      <p class="modal-note">Coming soon — currently collecting pilots only.</p>
+    </div>
   </div>
 </div>
 
@@ -1096,7 +1192,7 @@ async function clearProfile() {
 
 // ==================== SCORE (Supabase) ====================
 async function submitScore(profile, score, distance, bossesDefeated = 0) {
-  if (!profile || !profile.email) return { newRecord: false };
+  if (!profile || !profile.name) return { newRecord: false };
 
   // Always update localStorage best
   const prev = profile.bestScore || 0;
@@ -1112,21 +1208,20 @@ async function submitScore(profile, score, distance, bossesDefeated = 0) {
     try {
       // 1. Always insert a session row (every game = one entry)
       await client.from('stellar_sessions').insert({
-        player_email: profile.email,
-        player_name: profile.name,
+        player_callsign: profile.name,
         score: score,
         distance: distance,
         bosses_defeated: bossesDefeated,
       });
 
-      // 2. Update all-time best in players table
+      // 2. Update all-time best in players table (callsign is PK)
       await client.from('stellar_players').upsert({
-        email: profile.email,
-        name: profile.name,
+        callsign: profile.name,
+        email: profile.email || null,
         best_score: Math.max(score, prev),
         best_distance: Math.max(distance, profile.bestDistance || 0),
         updated_at: new Date().toISOString(),
-      }, { onConflict: 'email' });
+      }, { onConflict: 'callsign' });
     } catch (e) { console.warn('Score submit failed:', e.message); }
   }
 
@@ -1156,12 +1251,12 @@ async function _fetchLeaderboardFresh(limit, period) {
   try {
     const { data, error } = await client
       .from(_viewName(period))
-      .select('name, best_score, best_distance, updated_at')
+      .select('callsign, best_score, best_distance, updated_at')
       .order('best_score', { ascending: false })
       .limit(limit);
     if (error || !data) return null;
     return data.map(r => ({
-      name: r.name, score: r.best_score, distance: r.best_distance, _key: r.name,
+      name: r.callsign, score: r.best_score, distance: r.best_distance, _key: r.callsign,
     }));
   } catch (e) { console.warn('Leaderboard fetch failed:', e.message); return null; }
 }
@@ -3491,6 +3586,31 @@ async function showLeaderboard(period) {
   if (myToken === _lbRenderToken) {
     _renderLeaderboard(data, currentLbPeriod);
   }
+
+  // Schedule email opt-in popup after 5s — only if pilot hasn't responded yet
+  scheduleEmailModal();
+}
+
+let _emailModalTimer = null;
+function scheduleEmailModal() {
+  if (!profile) return;
+  if (profile.email) return; // Already subscribed
+  if (profile.emailDismissedAt) return; // Already declined
+  if (_emailModalTimer) return; // Already scheduled
+
+  _emailModalTimer = setTimeout(() => {
+    _emailModalTimer = null;
+    // Confirm we're still on the leaderboard screen
+    const lbVisible = !document.getElementById('lb-screen').classList.contains('hidden');
+    if (!lbVisible) return;
+    document.getElementById('email-modal').classList.remove('hidden');
+    setTimeout(() => document.getElementById('em-input').focus(), 100);
+  }, 5000);
+}
+
+function closeEmailModal() {
+  document.getElementById('email-modal').classList.add('hidden');
+  if (_emailModalTimer) { clearTimeout(_emailModalTimer); _emailModalTimer = null; }
 }
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c => ({
@@ -3699,16 +3819,37 @@ document.getElementById('beam-indicator').addEventListener('pointerdown', e => {
 
 document.getElementById('su-submit').addEventListener('click', async () => {
   const name = document.getElementById('su-name').value.trim();
-  const email = document.getElementById('su-email').value.trim();
   const errEl = document.getElementById('su-err');
   errEl.textContent = '';
   if (name.length < 2) { errEl.textContent = 'Callsign must be at least 2 characters'; return; }
   if (containsProfanity(name)) { errEl.textContent = 'Please choose a different callsign'; return; }
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { errEl.textContent = 'Please enter a valid email address'; return; }
-  profile = { name, email, bestScore: 0, bestDistance: 0, createdAt: Date.now() };
+
+  // Check if this callsign is already taken (case-insensitive match)
+  const submitBtn = document.getElementById('su-submit');
+  submitBtn.disabled = true;
+  submitBtn.textContent = 'CHECKING...';
+  try {
+    const client = sb();
+    if (client) {
+      const { data: existing } = await client
+        .from('stellar_players')
+        .select('callsign')
+        .ilike('callsign', name)
+        .limit(1);
+      if (existing && existing.length > 0) {
+        errEl.textContent = 'That callsign is taken — try another';
+        submitBtn.disabled = false;
+        submitBtn.textContent = '⚡  ENLIST & LAUNCH';
+        return;
+      }
+    }
+  } catch (e) { /* Network failure — proceed offline; conflict resolved on first save */ }
+
+  profile = { name, bestScore: 0, bestDistance: 0, createdAt: Date.now() };
   await saveProfile(profile);
-  // Production: POST { name, email } to backend signup endpoint
   audio.init(); await audio.resume();
+  submitBtn.disabled = false;
+  submitBtn.textContent = '⚡  ENLIST & LAUNCH';
   showMenu();
 });
 
@@ -3742,6 +3883,7 @@ document.addEventListener('keydown', (e) => {
 });
 
 document.getElementById('lb-back').addEventListener('click', () => {
+  closeEmailModal();
   if (profile) showMenu(); else showScreen('signup-screen');
 });
 document.getElementById('go-retry').addEventListener('click', () => startGame());
@@ -3750,6 +3892,56 @@ document.getElementById('go-menu').addEventListener('click', showMenu);
 document.getElementById('go-share').addEventListener('pointerdown', e => {
   e.stopPropagation();
   shareScore();
+});
+
+// Email opt-in modal handlers
+document.getElementById('em-submit').addEventListener('click', async () => {
+  const email = document.getElementById('em-input').value.trim();
+  const errEl = document.getElementById('em-err');
+  errEl.textContent = '';
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    errEl.textContent = 'Please enter a valid email address';
+    return;
+  }
+  const btn = document.getElementById('em-submit');
+  btn.disabled = true;
+  btn.textContent = 'SAVING...';
+  try {
+    profile.email = email;
+    profile.emailSubscribedAt = Date.now();
+    await saveProfile(profile);
+    // Update Supabase row with email (callsign-keyed)
+    const client = sb();
+    if (client) {
+      try {
+        await client.from('stellar_players').upsert({
+          callsign: profile.name,
+          email: email,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'callsign' });
+      } catch (e) { console.warn('Email save failed:', e.message); }
+    }
+    // Success state
+    document.querySelector('#email-modal .modal-icon').textContent = '✅';
+    document.querySelector('#email-modal .modal-title').textContent = 'YOU\'RE IN';
+    document.querySelector('#email-modal .modal-body').innerHTML = 'Thanks pilot! We\'ll send your weekly rank<br>once we have enough pilots flying.';
+    document.querySelector('#email-modal .form-group').style.display = 'none';
+    document.querySelector('#email-modal .modal-buttons').innerHTML = '<button class="btn" id="em-close">CLOSE</button>';
+    document.querySelector('#email-modal .modal-note').style.display = 'none';
+    document.getElementById('em-close').addEventListener('click', closeEmailModal);
+  } catch (e) {
+    errEl.textContent = 'Something went wrong — try again';
+    btn.disabled = false;
+    btn.textContent = 'SUBSCRIBE';
+  }
+});
+
+document.getElementById('em-skip').addEventListener('click', async () => {
+  if (profile) {
+    profile.emailDismissedAt = Date.now();
+    await saveProfile(profile);
+  }
+  closeEmailModal();
 });
 
 // ==================== BOOT ====================
