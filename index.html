@@ -490,7 +490,17 @@
   }
   @keyframes pulse { 0%, 100% { opacity: 0.7; } 50% { opacity: 1; } }
 
-  .lb-list { width: 100%; max-width: 320px; list-style: none; margin: 8px 0 20px; }
+  .lb-list {
+    width: 100%; max-width: 320px; list-style: none;
+    margin: 8px 0 16px;
+    max-height: 56vh;
+    overflow-y: auto;
+    overflow-x: hidden;
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+    padding-right: 2px;
+  }
+  .lb-list::-webkit-scrollbar { display: none; }
 
   /* Leaderboard period tabs */
   .lb-tabs {
@@ -1120,7 +1130,7 @@ async function _fetchLeaderboardFresh(limit, period) {
 }
 
 // Returns { data, fresh } where fresh=true if from network, false if from cache
-async function getLeaderboardCached(limit = 20, period = 'alltime') {
+async function getLeaderboardCached(limit = 100, period = 'alltime') {
   const slot = _lbCache[period] || _lbCache.alltime;
   const now = Date.now();
   const fresh = slot.data && (now - slot.ts) < LB_CACHE_TTL;
@@ -1143,7 +1153,7 @@ async function getLeaderboardCached(limit = 20, period = 'alltime') {
 }
 
 // Backward-compatible wrapper used by existing call sites
-async function getLeaderboard(limit = 20, period = 'alltime') {
+async function getLeaderboard(limit = 100, period = 'alltime') {
   const { data } = await getLeaderboardCached(limit, period);
   return data;
 }
@@ -1153,7 +1163,7 @@ function preloadLeaderboards() {
   ['daily', 'weekly', 'alltime'].forEach(p => {
     const slot = _lbCache[p];
     slot.ts = 0; // force refresh
-    getLeaderboardCached(20, p);
+    getLeaderboardCached(100, p);
   });
 }
 
@@ -3439,7 +3449,7 @@ async function showLeaderboard(period) {
   }
 
   // Fetch fresh in background
-  const { data } = await getLeaderboardCached(20, currentLbPeriod);
+  const { data } = await getLeaderboardCached(100, currentLbPeriod);
   // Only render if user hasn't switched tab in the meantime
   if (myToken === _lbRenderToken) {
     _renderLeaderboard(data, currentLbPeriod);
