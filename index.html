@@ -891,20 +891,20 @@
   <div id="email-modal" class="modal-overlay hidden">
     <div class="modal-card">
       <div class="modal-icon">📧</div>
-      <div class="modal-title">WEEKLY RANKINGS</div>
+      <div class="modal-title">STAY IN THE LOOP</div>
       <div class="modal-body">
-        Want your weekly rank delivered to your inbox?<br>
-        We'll send a recap every Sunday once we have enough pilots.
+        Get your weekly rank every Sunday<br>
+        <span style="color:#f78a3a;">+ early access to new games</span> we launch.
       </div>
       <div class="form-group" style="margin-top:18px;">
-        <input id="em-input" type="email" placeholder="pilot@unis.org" autocomplete="email">
+        <input id="em-input" type="email" placeholder="pilot@gmail.com" autocomplete="email">
         <div class="err" id="em-err"></div>
       </div>
       <div class="modal-buttons">
         <button class="btn" id="em-submit">SUBSCRIBE</button>
         <button class="btn ghost" id="em-skip">MAYBE LATER</button>
       </div>
-      <p class="modal-note">Coming soon — currently collecting pilots only.</p>
+      <p class="modal-note">Be first to play. Unsubscribe anytime.</p>
     </div>
   </div>
 </div>
@@ -3924,7 +3924,7 @@ document.getElementById('em-submit').addEventListener('click', async () => {
     // Success state
     document.querySelector('#email-modal .modal-icon').textContent = '✅';
     document.querySelector('#email-modal .modal-title').textContent = 'YOU\'RE IN';
-    document.querySelector('#email-modal .modal-body').innerHTML = 'Thanks pilot! We\'ll send your weekly rank<br>once we have enough pilots flying.';
+    document.querySelector('#email-modal .modal-body').innerHTML = 'Welcome aboard, pilot!<br>You\'ll hear from us first when new games launch.';
     document.querySelector('#email-modal .form-group').style.display = 'none';
     document.querySelector('#email-modal .modal-buttons').innerHTML = '<button class="btn" id="em-close">CLOSE</button>';
     document.querySelector('#email-modal .modal-note').style.display = 'none';
