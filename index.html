@@ -1177,18 +1177,46 @@ function getCanvasX(clientX) {
   const r = getCanvasRect();
   return (clientX - r.left) * (W / r.width);
 }
-canvas.addEventListener('pointerdown', e => {
+
+// Body-level pointer tracking — works anywhere on screen, not just inside the canvas.
+// Allows multi-touch: one finger drives the ship, another finger can tap BEAM/weapons.
+let activePointerId = null;
+
+function isUIElement(target) {
+  if (!target) return false;
+  // Skip if touching any interactive UI (buttons, inputs, screens, pause overlay)
+  return !!target.closest('button, input, .screen:not(.hidden), #pause-overlay.active, #boss-name, #boss-bar, #hud');
+}
+
+document.body.addEventListener('pointerdown', e => {
+  if (isUIElement(e.target)) return;
+  // Only one finger drives the ship — additional touches are free for buttons
+  if (activePointerId !== null) return;
   e.preventDefault();
+  activePointerId = e.pointerId;
   pointerActive = true;
   pointerX = getCanvasX(e.clientX);
-  canvas.setPointerCapture(e.pointerId);
 }, { passive: false });
-canvas.addEventListener('pointermove', e => {
+
+document.body.addEventListener('pointermove', e => {
+  if (e.pointerId !== activePointerId) return;
   e.preventDefault();
-  if (pointerActive) pointerX = getCanvasX(e.clientX);
+  pointerX = getCanvasX(e.clientX);
 }, { passive: false });
-canvas.addEventListener('pointerup', () => { pointerActive = false; pointerX = null; });
-canvas.addEventListener('pointercancel', () => { pointerActive = false; pointerX = null; });
+
+document.body.addEventListener('pointerup', e => {
+  if (e.pointerId !== activePointerId) return;
+  activePointerId = null;
+  pointerActive = false;
+  pointerX = null;
+});
+
+document.body.addEventListener('pointercancel', e => {
+  if (e.pointerId !== activePointerId) return;
+  activePointerId = null;
+  pointerActive = false;
+  pointerX = null;
+});
 
 window.addEventListener('keydown', e => {
   // Don't intercept keys when user is typing in an input field
@@ -3513,11 +3541,10 @@ document.getElementById('auto-weapon-btn').addEventListener('click', e => {
 });
 document.getElementById('auto-weapon-btn').addEventListener('pointerdown', e => e.stopPropagation());
 
-document.getElementById('beam-indicator').addEventListener('click', e => {
+document.getElementById('beam-indicator').addEventListener('pointerdown', e => {
   e.stopPropagation();
-  if (S && !S.gameOver) activateBeam();
+  if (S && !S.gameOver && !paused) activateBeam();
 });
-document.getElementById('beam-indicator').addEventListener('pointerdown', e => e.stopPropagation());
 
 document.getElementById('su-submit').addEventListener('click', async () => {
   const name = document.getElementById('su-name').value.trim();
