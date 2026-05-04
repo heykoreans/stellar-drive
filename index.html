@@ -401,6 +401,37 @@
   @keyframes pulse { 0%, 100% { opacity: 0.7; } 50% { opacity: 1; } }
 
   .lb-list { width: 100%; max-width: 320px; list-style: none; margin: 8px 0 20px; }
+
+  /* Leaderboard period tabs */
+  .lb-tabs {
+    display: flex; gap: 4px;
+    width: 100%; max-width: 320px;
+    margin: 12px 0 8px;
+    background: rgba(10, 25, 60, 0.4);
+    border: 1px solid rgba(77, 208, 255, 0.15);
+    border-radius: 6px;
+    padding: 3px;
+  }
+  .lb-tab {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: rgba(255, 255, 255, 0.5);
+    font-family: inherit;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    padding: 7px 4px;
+    cursor: pointer;
+    border-radius: 4px;
+    transition: all 0.2s;
+  }
+  .lb-tab:hover { color: rgba(255, 255, 255, 0.8); }
+  .lb-tab.active {
+    background: rgba(217, 119, 87, 0.85);
+    color: #fff;
+    box-shadow: 0 2px 8px rgba(217, 119, 87, 0.35);
+  }
   .lb-row {
     display: grid;
     grid-template-columns: 32px 1fr auto auto;
@@ -611,7 +642,11 @@
   <div id="lb-screen" class="screen hidden">
     <div class="unis-badge" style="margin-bottom:8px;">🛡 UNIS SPACE DEFENSE CORPS</div>
     <div class="title" style="font-size:24px; letter-spacing:4px;">LEADERBOARD</div>
-    <div class="tag">TOP PILOTS</div>
+    <div class="lb-tabs">
+      <button class="lb-tab active" data-period="daily">TODAY</button>
+      <button class="lb-tab" data-period="weekly">THIS WEEK</button>
+      <button class="lb-tab" data-period="alltime">ALL TIME</button>
+    </div>
     <ol class="lb-list" id="lb-list"></ol>
     <button class="btn secondary" id="lb-back">BACK</button>
   </div>
@@ -911,7 +946,7 @@ async function clearProfile() {
 }
 
 // ==================== SCORE (Supabase) ====================
-async function submitScore(profile, score, distance) {
+async function submitScore(profile, score, distance, bossesDefeated = 0) {
   if (!profile || !profile.email) return { newRecord: false };
 
   // Always update localStorage best
@@ -923,10 +958,19 @@ async function submitScore(profile, score, distance) {
     await saveProfile(profile);
   }
 
-  // Upsert to Supabase
   const client = sb();
   if (client) {
     try {
+      // 1. Always insert a session row (every game = one entry)
+      await client.from('stellar_sessions').insert({
+        player_email: profile.email,
+        player_name: profile.name,
+        score: score,
+        distance: distance,
+        bosses_defeated: bossesDefeated,
+      });
+
+      // 2. Update all-time best in players table
       await client.from('stellar_players').upsert({
         email: profile.email,
         name: profile.name,
@@ -940,13 +984,21 @@ async function submitScore(profile, score, distance) {
   return { newRecord, entry: { name: profile.name, score, distance } };
 }
 
-async function getLeaderboard(limit = 20) {
+// period = 'daily' | 'weekly' | 'alltime'
+async function getLeaderboard(limit = 20, period = 'alltime') {
   const client = sb();
+  const viewName = {
+    daily: 'stellar_leaderboard_daily',
+    weekly: 'stellar_leaderboard_weekly',
+    alltime: 'stellar_leaderboard_alltime',
+  }[period] || 'stellar_leaderboard_alltime';
+
   if (client) {
     try {
       const { data, error } = await client
-        .from('stellar_leaderboard')
+        .from(viewName)
         .select('name, best_score, best_distance, updated_at')
+        .order('best_score', { ascending: false })
         .limit(limit);
       if (!error && data) {
         return data.map(r => ({
@@ -958,7 +1010,6 @@ async function getLeaderboard(limit = 20) {
       }
     } catch (e) { console.warn('Leaderboard failed:', e.message); }
   }
-  // Fallback: local only
   if (profile) {
     return [{ name: profile.name, score: profile.bestScore || 0, distance: profile.bestDistance || 0, _key: profile.name }];
   }
@@ -2869,13 +2920,25 @@ async function showMenu() {
   document.getElementById('menu-best').textContent = (profile.bestScore || 0).toLocaleString();
   showScreen('menu-screen');
 }
-async function showLeaderboard() {
+let currentLbPeriod = 'daily';
+
+async function showLeaderboard(period) {
+  if (period) currentLbPeriod = period;
   showScreen('lb-screen');
+  // Update tab UI
+  document.querySelectorAll('.lb-tab').forEach(b => {
+    b.classList.toggle('active', b.dataset.period === currentLbPeriod);
+  });
   const list = document.getElementById('lb-list');
   list.innerHTML = '<li class="lb-empty">Loading...</li>';
-  const entries = await getLeaderboard(20);
+  const entries = await getLeaderboard(20, currentLbPeriod);
   if (entries.length === 0) {
-    list.innerHTML = '<li class="lb-empty">No records yet.<br>Be the first pilot!</li>';
+    const emptyMsg = currentLbPeriod === 'daily'
+      ? 'No records today yet.<br>Be the first pilot of the day!'
+      : currentLbPeriod === 'weekly'
+      ? 'No records this week yet.<br>Be the first pilot of the week!'
+      : 'No records yet.<br>Be the first pilot!';
+    list.innerHTML = `<li class="lb-empty">${emptyMsg}</li>`;
     return;
   }
   list.innerHTML = '';
@@ -2924,27 +2987,28 @@ async function startGame() {
 async function showGameOver() {
   const finalScore = S.score;
   const finalDistance = Math.floor(S.distance);
+  const bossesDefeated = S.bossesDefeated;
   let newRecord = false;
   if (finalScore > 0 && profile) {
     const prevBest = profile.bestScore || 0;
-    if (finalScore > prevBest) {
-      profile.bestScore = finalScore;
-      profile.bestDistance = finalDistance;
-      await saveProfile(profile);
-    }
-    const result = await submitScore(profile, finalScore, finalDistance);
+    const result = await submitScore(profile, finalScore, finalDistance, bossesDefeated);
     if (result && result.newRecord && finalScore > prevBest) newRecord = true;
   }
+
+  // Rank in today's leaderboard (more engaging than all-time)
   let rank = '?';
-  const all = await getLeaderboard(100);
-  const myEntry = all.findIndex(e => e._key === 'lb:' + (profile?.hash || ''));
-  if (myEntry >= 0) rank = (myEntry + 1).toString();
+  try {
+    const all = await getLeaderboard(100, 'daily');
+    const myIdx = all.findIndex(e => e.name === profile?.name);
+    if (myIdx >= 0) rank = (myIdx + 1).toString();
+  } catch (e) {}
 
   const stats = document.getElementById('go-stats');
   stats.innerHTML = `
     <div class="row highlight"><span>SCORE</span><span class="num">${finalScore.toLocaleString()}</span></div>
     <div class="row"><span>DISTANCE</span><span class="num">${finalDistance}m</span></div>
-    <div class="row"><span>RANK</span><span class="num">#${rank}</span></div>
+    <div class="row"><span>BOSSES DOWN</span><span class="num">${bossesDefeated}</span></div>
+    <div class="row"><span>RANK TODAY</span><span class="num">#${rank}</span></div>
     ${newRecord ? '<div class="new-record">★ NEW PERSONAL BEST ★</div>' : ''}
   `;
   showScreen('go-screen');
@@ -2988,7 +3052,10 @@ document.getElementById('su-submit').addEventListener('click', async () => {
 });
 
 document.getElementById('menu-play').addEventListener('click', () => startGame());
-document.getElementById('menu-lb').addEventListener('click', showLeaderboard);
+document.getElementById('menu-lb').addEventListener('click', () => showLeaderboard('daily'));
+document.querySelectorAll('.lb-tab').forEach(btn => {
+  btn.addEventListener('click', () => showLeaderboard(btn.dataset.period));
+});
 document.getElementById('menu-logout').addEventListener('click', async () => {
   if (confirm('Reset account and return to start?')) {
     await clearProfile();
@@ -3000,7 +3067,7 @@ document.getElementById('lb-back').addEventListener('click', () => {
   if (profile) showMenu(); else showScreen('signup-screen');
 });
 document.getElementById('go-retry').addEventListener('click', () => startGame());
-document.getElementById('go-lb').addEventListener('click', showLeaderboard);
+document.getElementById('go-lb').addEventListener('click', () => showLeaderboard('daily'));
 document.getElementById('go-menu').addEventListener('click', showMenu);
 
 // ==================== BOOT ====================
