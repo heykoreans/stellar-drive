@@ -3534,22 +3534,21 @@ let autoWeaponTimer = 0;
 const AUTO_INTERVAL = 4; // seconds per weapon cycle
 
 document.querySelectorAll('.weapon-btn').forEach(btn => {
-  btn.addEventListener('click', e => {
+  // pointerdown for instant response — works while ship is being dragged
+  btn.addEventListener('pointerdown', e => {
     e.stopPropagation();
     autoWeapon = false;
     document.getElementById('auto-weapon-btn').classList.remove('on');
     switchWeapon(btn.dataset.w);
   });
-  btn.addEventListener('pointerdown', e => e.stopPropagation());
 });
 
-document.getElementById('auto-weapon-btn').addEventListener('click', e => {
+document.getElementById('auto-weapon-btn').addEventListener('pointerdown', e => {
   e.stopPropagation();
   autoWeapon = !autoWeapon;
   document.getElementById('auto-weapon-btn').classList.toggle('on', autoWeapon);
   autoWeaponTimer = 0;
 });
-document.getElementById('auto-weapon-btn').addEventListener('pointerdown', e => e.stopPropagation());
 
 document.getElementById('beam-indicator').addEventListener('pointerdown', e => {
   e.stopPropagation();
