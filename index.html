@@ -3551,27 +3551,53 @@ let lastGameBosses = 0;
 let lastGameRank = '?';
 
 async function shareScore() {
-  const text = lastGameRank !== '?'
-    ? `🚀 STELLAR DRIVE — I scored ${lastGameScore.toLocaleString()} points (${lastGameDistance}m, rank #${lastGameRank} today). Can you beat me?\nhttps://game.mybumo.com`
-    : `🚀 STELLAR DRIVE — I scored ${lastGameScore.toLocaleString()} points (${lastGameDistance}m). Can you beat me?\nhttps://game.mybumo.com`;
+  const url = 'https://game.mybumo.com';
+  // Inviting Korean message — pre-written so friends actually want to try the game.
+  // No URL inside the text — it's passed via the `url` field below to avoid duplication
+  // in the share sheet preview.
+  const message = lastGameRank !== '?'
+    ? `🚀 You gotta try STELLAR DRIVE — so addictive! I scored ${lastGameScore.toLocaleString()} and ranked #${lastGameRank} today 😎 Think you can beat me?`
+    : `🚀 You gotta try STELLAR DRIVE — fun space shooter, defend Earth from aliens. I scored ${lastGameScore.toLocaleString()}. Think you can beat me?`;
 
+  // If native share sheet is available (mobile + most modern browsers), ALWAYS use it.
+  // Never fall to mailto here — even if user cancels or share fails, just exit silently.
   if (navigator.share) {
     try {
       await navigator.share({
         title: 'STELLAR DRIVE',
-        text: text,
-        url: 'https://game.mybumo.com',
+        text: message,
+        url: url,
       });
-      return;
     } catch (e) {
-      // User cancelled — silently exit
-      if (e && e.name === 'AbortError') return;
+      // User cancelled or share failed — silently exit, do not fall back
     }
+    return;
   }
-  // Fallback for desktop / browsers without Web Share API
-  const subject = encodeURIComponent('Beat my STELLAR DRIVE score!');
-  const body = encodeURIComponent(text);
-  window.location.href = `mailto:?subject=${subject}&body=${body}`;
+
+  // Desktop / browsers without Web Share API: copy to clipboard (URL included here)
+  const fullText = `${message}\n${url}`;
+  try {
+    await navigator.clipboard.writeText(fullText);
+    showShareToast('Link copied to clipboard!');
+  } catch (e) {
+    // Last-resort fallback: open mail composer
+    const subject = encodeURIComponent('You should try this game!');
+    const body = encodeURIComponent(fullText);
+    window.location.href = `mailto:?subject=${subject}&body=${body}`;
+  }
+}
+
+function showShareToast(msg) {
+  let toast = document.getElementById('share-toast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'share-toast';
+    toast.style.cssText = 'position:fixed;bottom:30px;left:50%;transform:translateX(-50%);background:rgba(77,208,255,0.95);color:#0a1428;padding:12px 24px;border-radius:8px;font-size:13px;font-weight:700;letter-spacing:1px;z-index:9999;box-shadow:0 4px 20px rgba(77,208,255,0.4);transition:opacity 0.3s;';
+    document.body.appendChild(toast);
+  }
+  toast.textContent = msg;
+  toast.style.opacity = '1';
+  setTimeout(() => { toast.style.opacity = '0'; }, 2200);
 }
 
 async function showGameOver() {
