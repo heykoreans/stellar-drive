@@ -50,17 +50,22 @@
 
   /* Weapon selector */
   #weapons {
-    position: absolute; top: 50px; left: 50%; transform: translateX(-50%);
-    display: flex; gap: 6px;
+    position: absolute;
+    left: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
     z-index: 15;
     pointer-events: auto;
   }
   .weapon-btn {
-    width: 42px; height: 42px;
+    width: 48px; height: 48px;
     border: 2px solid;
-    border-radius: 8px;
-    background: rgba(10, 25, 60, 0.7);
-    color: #fff; font-weight: 800; font-size: 16px;
+    border-radius: 10px;
+    background: rgba(10, 25, 60, 0.75);
+    color: #fff; font-weight: 800; font-size: 17px;
     display: flex; align-items: center; justify-content: center;
     cursor: pointer;
     backdrop-filter: blur(4px);
@@ -70,8 +75,8 @@
     line-height: 1;
   }
   .weapon-btn .key {
-    position: absolute; top: 1px; right: 3px;
-    font-size: 8px; opacity: 0.5;
+    position: absolute; top: 2px; right: 4px;
+    font-size: 8px; opacity: 0.35;
   }
   .weapon-btn.flame { border-color: rgba(255, 107, 53, 0.4); color: #ff8a4d; }
   .weapon-btn.frost { border-color: rgba(77, 208, 255, 0.4); color: #4dd0ff; }
@@ -80,6 +85,25 @@
   .weapon-btn.active.frost { background: rgba(77, 208, 255, 0.35); border-color: #4dd0ff; box-shadow: 0 0 16px rgba(77, 208, 255, 0.7); }
   .weapon-btn.active.bolt  { background: rgba(255, 215, 0, 0.35);  border-color: #ffd700; box-shadow: 0 0 16px rgba(255, 215, 0, 0.7); }
   .weapon-btn:active { transform: scale(0.92); }
+
+  /* AUTO weapon button */
+  #auto-weapon-btn {
+    width: 48px; height: 32px;
+    border: 1px solid rgba(168, 181, 160, 0.4);
+    border-radius: 8px;
+    background: rgba(10, 25, 60, 0.75);
+    color: rgba(168, 181, 160, 0.6);
+    font-size: 9px; font-weight: 800; letter-spacing: 1px;
+    cursor: pointer;
+    backdrop-filter: blur(4px);
+    font-family: inherit;
+  }
+  #auto-weapon-btn.on {
+    background: rgba(168, 181, 160, 0.2);
+    border-color: #A8B5A0;
+    color: #A8B5A0;
+    box-shadow: 0 0 10px rgba(168, 181, 160, 0.4);
+  }
 
   #beam-indicator {
     position: absolute; top: 50px; right: 12px;
@@ -188,6 +212,72 @@
     display: flex; align-items: center; justify-content: center;
     font-size: 11px; z-index: 16;
     backdrop-filter: blur(4px);
+  }
+
+  #pause-btn {
+    position: absolute; top: 8px; right: 8px;
+    width: 26px; height: 26px;
+    background: rgba(10, 25, 60, 0.6);
+    border: 1px solid rgba(100, 200, 255, 0.3);
+    border-radius: 50%;
+    color: #fff; cursor: pointer;
+    display: none; align-items: center; justify-content: center;
+    font-size: 11px; z-index: 16;
+    backdrop-filter: blur(4px);
+  }
+  #pause-btn.visible { display: flex; }
+
+  /* Pause overlay */
+  #pause-overlay {
+    position: absolute; inset: 0;
+    background: rgba(2, 6, 20, 0.82);
+    backdrop-filter: blur(4px);
+    display: none;
+    flex-direction: column;
+    align-items: center; justify-content: center;
+    z-index: 25;
+    gap: 16px;
+  }
+  #pause-overlay.active { display: flex; }
+  #pause-overlay .pause-title {
+    font-size: 22px; font-weight: 900; letter-spacing: 6px;
+    color: #F4ECE3;
+  }
+  #pause-overlay .pause-sub {
+    font-size: 10px; letter-spacing: 3px; opacity: 0.5;
+    color: #F4ECE3;
+  }
+  .pause-btns {
+    display: flex; flex-direction: column; gap: 10px;
+    align-items: center; margin-top: 8px;
+  }
+  .pause-btn {
+    background: rgba(77, 208, 255, 0.15);
+    color: #4dd0ff;
+    border: 2px solid rgba(77, 208, 255, 0.5);
+    padding: 11px 36px;
+    font-size: 12px; font-weight: 900;
+    border-radius: 30px;
+    cursor: pointer;
+    letter-spacing: 2px;
+    font-family: inherit;
+    min-width: 180px;
+    transition: all 0.15s;
+  }
+  .pause-btn:hover {
+    background: rgba(77, 208, 255, 0.25);
+    border-color: #4dd0ff;
+    box-shadow: 0 0 14px rgba(77, 208, 255, 0.4);
+  }
+  .pause-btn.primary {
+    background: rgba(77, 208, 255, 0.3);
+    border-color: #4dd0ff;
+    color: #fff;
+    box-shadow: 0 0 12px rgba(77, 208, 255, 0.5);
+  }
+  .pause-btn.primary:hover {
+    background: rgba(77, 208, 255, 0.45);
+    box-shadow: 0 0 20px rgba(77, 208, 255, 0.7);
   }
 
   #boss-bar {
@@ -526,6 +616,17 @@
   <canvas id="game" width="400" height="600"></canvas>
 
   <button id="sound-toggle" title="Sound">♪</button>
+  <button id="pause-btn" title="Pause">⏸</button>
+
+  <!-- Pause overlay -->
+  <div id="pause-overlay">
+    <div class="pause-title">PAUSED</div>
+    <div class="pause-sub">MISSION SUSPENDED</div>
+    <div class="pause-btns">
+      <button id="pause-resume" class="pause-btn primary">▶  RESUME</button>
+      <button id="pause-home" class="pause-btn">⌂  HOME</button>
+    </div>
+  </div>
 
   <div id="boss-name"><span>▼</span> <span id="boss-name-text">MOTHERSHIP</span> <span class="elem-badge" id="boss-elem">F</span></div>
   <div id="boss-bar"><div class="fill" style="width:100%"></div></div>
@@ -545,6 +646,7 @@
     <button class="weapon-btn flame active" data-w="flame">F<span class="key">1</span></button>
     <button class="weapon-btn frost" data-w="frost">I<span class="key">2</span></button>
     <button class="weapon-btn bolt" data-w="bolt">B<span class="key">3</span></button>
+    <button id="auto-weapon-btn" title="Auto cycle weapons">AUTO</button>
   </div>
 
   <button id="beam-indicator" title="BEAM (SPACE)">
@@ -581,7 +683,7 @@
 
     <div class="form-group">
       <label>PILOT CALLSIGN</label>
-      <input id="su-name" type="text" maxlength="12" placeholder="ex. NOVA-7" autocomplete="off">
+      <input id="su-name" type="text" maxlength="12" placeholder="ex. OLIVIA-S" autocomplete="off">
     </div>
     <div class="form-group">
       <label>PILOT EMAIL</label>
@@ -589,7 +691,7 @@
       <div class="err" id="su-err"></div>
     </div>
     <p class="privacy">
-      Your email is used for UNIS ranking. Only your callsign appears publicly.
+      Used to save your score. Only your callsign appears on the leaderboard.
     </p>
     <button class="btn" id="su-submit">⚡  ENLIST &amp; LAUNCH</button>
   </div>
@@ -1063,22 +1165,35 @@ const W = canvas.width, H = canvas.height;
 let pointerX = null, pointerActive = false;
 let keyL = false, keyR = false;
 
+// Cache canvas rect for performance (recalculate on resize only)
+let _canvasRect = null;
+function getCanvasRect() {
+  if (!_canvasRect) _canvasRect = canvas.getBoundingClientRect();
+  return _canvasRect;
+}
+window.addEventListener('resize', () => { _canvasRect = null; });
+
 function getCanvasX(clientX) {
-  const r = canvas.getBoundingClientRect();
+  const r = getCanvasRect();
   return (clientX - r.left) * (W / r.width);
 }
 canvas.addEventListener('pointerdown', e => {
+  e.preventDefault();
   pointerActive = true;
   pointerX = getCanvasX(e.clientX);
   canvas.setPointerCapture(e.pointerId);
-});
+}, { passive: false });
 canvas.addEventListener('pointermove', e => {
+  e.preventDefault();
   if (pointerActive) pointerX = getCanvasX(e.clientX);
-});
+}, { passive: false });
 canvas.addEventListener('pointerup', () => { pointerActive = false; pointerX = null; });
 canvas.addEventListener('pointercancel', () => { pointerActive = false; pointerX = null; });
 
 window.addEventListener('keydown', e => {
+  // Don't intercept keys when user is typing in an input field
+  const tag = (e.target && e.target.tagName) || '';
+  if (tag === 'INPUT' || tag === 'TEXTAREA') return;
   if (e.key === 'ArrowLeft' || e.key.toLowerCase() === 'a') keyL = true;
   if (e.key === 'ArrowRight' || e.key.toLowerCase() === 'd') keyR = true;
   if (e.key === '1') switchWeapon('flame');
@@ -1090,6 +1205,8 @@ window.addEventListener('keydown', e => {
   }
 });
 window.addEventListener('keyup', e => {
+  const tag = (e.target && e.target.tagName) || '';
+  if (tag === 'INPUT' || tag === 'TEXTAREA') return;
   if (e.key === 'ArrowLeft' || e.key.toLowerCase() === 'a') keyL = false;
   if (e.key === 'ArrowRight' || e.key.toLowerCase() === 'd') keyR = false;
 });
@@ -1307,8 +1424,9 @@ function spawnBoss() {
     targetY: 90, entered: false,
     vx: 80 + tier * 8,
     hp, maxHp: hp,
-    fireTimer: 2.5,
-    patternIdx: 0,
+    // LASER boss: open with the laser so the player always experiences it at least once
+    fireTimer: typeIdx === 1 ? 1.6 : 2.5,
+    patternIdx: typeIdx === 1 ? 2 : 0,
     laserState: 'idle',
     laserT: 0, laserX: 0, laserDir: 1,
     hitFlash: 0,
@@ -1574,7 +1692,10 @@ function bossExecutePattern(b) {
       b.laserState = 'charging';
       b.laserT = (enrage ? 0.8 : 1.2) * timerMul;
       b.laserDir = (S.ship.x < W/2) ? 1 : -1;
-      b.laserX = b.laserDir > 0 ? 20 : W - 20;
+      // Safe zone only on the START side (~28px). Laser sweeps all the way to opposite edge.
+      b.laserStartX = b.laserDir > 0 ? 44 : W - 44;
+      b.laserEndX   = b.laserDir > 0 ? W + 10 : -10;
+      b.laserX = b.laserStartX;
       audio.laserCharge();
       b.fireTimer = b.laserT + 1.6 + 0.6;
       b.patternIdx = 0;
@@ -1713,7 +1834,12 @@ function update(dt) {
     S.ship.x += dx * 340 * moveMul * dt;
   } else if (pointerActive && pointerX !== null) {
     const diff = pointerX - S.ship.x;
-    S.ship.x += diff * Math.min(1, dt * 14 * moveMul);
+    const absDiff = Math.abs(diff);
+    if (absDiff > 2) {
+      // Fast direct follow for large movements, smooth for small adjustments
+      const speed = absDiff > 40 ? Math.min(1, dt * 28 * moveMul) : Math.min(1, dt * 18 * moveMul);
+      S.ship.x += diff * speed;
+    }
   }
   S.ship.x = Math.max(16, Math.min(W - 16, S.ship.x));
 
@@ -1812,6 +1938,28 @@ function update(dt) {
   // distance
   if (!S.bossActive) {
     S.distance += dt * (50 + Math.min(50, S.distance / 100));
+
+  // AUTO weapon: counter boss element, otherwise cycle through weapons
+  if (autoWeapon && S && !S.gameOver && !paused) {
+    // Counter map — what beats each element (flame→frost→bolt→flame)
+    const COUNTER = { flame: 'bolt', frost: 'flame', bolt: 'frost' };
+
+    if (S.boss && S.boss.entered && COUNTER[S.boss.element]) {
+      // Boss active: lock to counter weapon
+      const counter = COUNTER[S.boss.element];
+      if (S.weapon !== counter) switchWeapon(counter);
+      autoWeaponTimer = AUTO_INTERVAL; // reset cycle timer for after boss
+    } else {
+      // Normal play: cycle every N seconds
+      autoWeaponTimer -= dt;
+      if (autoWeaponTimer <= 0) {
+        const weapons = ['flame', 'frost', 'bolt'];
+        const next = weapons[(weapons.indexOf(S.weapon) + 1) % 3];
+        switchWeapon(next);
+        autoWeaponTimer = AUTO_INTERVAL;
+      }
+    }
+  }
   }
 
   // player fire
@@ -2236,7 +2384,9 @@ function updateBoss(dt) {
     } else if (b.laserState === 'sweeping') {
       b.laserT -= dt;
       b.laserX += b.laserDir * (W / 1.6) * dt;
-      if (b.laserX < -10 || b.laserX > W + 10 || b.laserT <= 0) {
+      // Stop when laser reaches its end position (within safe zones)
+      const reachedEnd = b.laserDir > 0 ? b.laserX >= b.laserEndX : b.laserX <= b.laserEndX;
+      if (reachedEnd || b.laserT <= 0) {
         b.laserState = 'idle';
       }
       if (!isInvuln() && Math.abs(S.ship.x - b.laserX) < 14) {
@@ -2435,6 +2585,9 @@ function hitShip() {
 function gameOver() {
   S.gameOver = true;
   running = false;
+  paused = false;
+  document.getElementById('pause-overlay').classList.remove('active');
+  document.getElementById('pause-btn').classList.remove('visible');
   spawnParticles(S.ship.x, S.ship.y, '#ff6b6b', 40, 300);
   audio.bigExplode();
   audio.stopMusic();
@@ -2492,9 +2645,29 @@ function render() {
     const b = S.boss;
     if (b.laserState === 'charging') {
       const a = 0.3 + Math.sin(Date.now() / 40) * 0.3;
+      // Telegraph the laser sweep path
       ctx.fillStyle = `rgba(255, 100, 0, ${a})`;
-      const startX = b.laserDir > 0 ? 20 : W - 20;
+      const startX = b.laserStartX || (b.laserDir > 0 ? 44 : W - 44);
       ctx.fillRect(startX - 2, b.y, 4, H - b.y);
+      // Telegraph the SAFE ZONE only on the START side (opposite side gets hit)
+      const safeA = 0.5 + Math.sin(Date.now() / 200) * 0.3;
+      ctx.fillStyle = `rgba(120, 240, 140, ${safeA})`;
+      if (b.laserDir > 0) {
+        // Sweeps right → safe is far LEFT
+        ctx.fillRect(0, b.y + 30, 28, H - b.y - 30);
+        ctx.fillStyle = `rgba(120, 240, 140, ${safeA + 0.2})`;
+        ctx.font = 'bold 9px Nunito, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('SAFE', 14, b.y + 50);
+      } else {
+        // Sweeps left → safe is far RIGHT
+        ctx.fillRect(W - 28, b.y + 30, 28, H - b.y - 30);
+        ctx.fillStyle = `rgba(120, 240, 140, ${safeA + 0.2})`;
+        ctx.font = 'bold 9px Nunito, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('SAFE', W - 14, b.y + 50);
+      }
+      ctx.textAlign = 'left';
     } else if (b.laserState === 'sweeping') {
       ctx.fillStyle = 'rgba(255, 200, 100, 0.4)';
       ctx.fillRect(b.laserX - 18, b.y, 36, H - b.y);
@@ -3138,8 +3311,27 @@ function updateHUD() {
   }
 }
 
+let paused = false;
+
+function togglePause() {
+  if (!S || S.gameOver) return;
+  paused = !paused;
+  document.getElementById('pause-overlay').classList.toggle('active', paused);
+  document.getElementById('pause-btn').textContent = paused ? '▶' : '⏸';
+  if (paused) {
+    // Suspend audio context — silences all sound instantly
+    if (audio.ctx && audio.ctx.state === 'running') audio.ctx.suspend();
+  } else {
+    // Resume audio context
+    if (audio.ctx && audio.ctx.state === 'suspended') audio.ctx.resume();
+    lastT = performance.now();
+    requestAnimationFrame(loop);
+  }
+}
+
 function loop(t) {
   if (!running) return;
+  if (paused) return; // suspended — resume() will restart
   const dt = Math.min(0.04, (t - lastT) / 1000);
   lastT = t;
   update(dt);
@@ -3238,6 +3430,13 @@ async function startGame() {
   audio.testPing();
   setTimeout(() => audio.startMusic(), 200);
   S = newState();
+  paused = false;
+  autoWeapon = false;
+  autoWeaponTimer = 0;
+  document.getElementById('auto-weapon-btn').classList.remove('on');
+  document.getElementById('pause-overlay').classList.remove('active');
+  document.getElementById('pause-btn').textContent = '⏸';
+  document.getElementById('pause-btn').classList.add('visible');
   // reset weapon UI to default
   document.querySelectorAll('.weapon-btn').forEach(b => {
     b.classList.toggle('active', b.dataset.w === 'flame');
@@ -3292,13 +3491,27 @@ document.getElementById('sound-toggle').addEventListener('click', () => {
   if (!muted) audio.testPing();
 });
 
+let autoWeapon = false;
+let autoWeaponTimer = 0;
+const AUTO_INTERVAL = 4; // seconds per weapon cycle
+
 document.querySelectorAll('.weapon-btn').forEach(btn => {
   btn.addEventListener('click', e => {
     e.stopPropagation();
+    autoWeapon = false;
+    document.getElementById('auto-weapon-btn').classList.remove('on');
     switchWeapon(btn.dataset.w);
   });
   btn.addEventListener('pointerdown', e => e.stopPropagation());
 });
+
+document.getElementById('auto-weapon-btn').addEventListener('click', e => {
+  e.stopPropagation();
+  autoWeapon = !autoWeapon;
+  document.getElementById('auto-weapon-btn').classList.toggle('on', autoWeapon);
+  autoWeaponTimer = 0;
+});
+document.getElementById('auto-weapon-btn').addEventListener('pointerdown', e => e.stopPropagation());
 
 document.getElementById('beam-indicator').addEventListener('click', e => {
   e.stopPropagation();
@@ -3332,6 +3545,23 @@ document.getElementById('menu-logout').addEventListener('click', async () => {
     showScreen('signup-screen');
   }
 });
+document.getElementById('pause-btn').addEventListener('click', togglePause);
+document.getElementById('pause-resume').addEventListener('click', togglePause);
+document.getElementById('pause-home').addEventListener('click', () => {
+  // Quit current game and return to menu
+  paused = false;
+  running = false;
+  if (audio.ctx && audio.ctx.state === 'suspended') audio.ctx.resume();
+  audio.stopMusic();
+  document.getElementById('pause-overlay').classList.remove('active');
+  document.getElementById('pause-btn').classList.remove('visible');
+  if (S) S.gameOver = true;
+  showMenu();
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && running) togglePause();
+});
+
 document.getElementById('lb-back').addEventListener('click', () => {
   if (profile) showMenu(); else showScreen('signup-screen');
 });
