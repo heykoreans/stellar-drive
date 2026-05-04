@@ -556,6 +556,19 @@
 
   .button-row { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
   .button-row .btn { min-width: 0; padding: 12px 20px; font-size: 11px; }
+  .share-btn {
+    margin-top: 14px !important;
+    background: rgba(77, 208, 255, 0.15) !important;
+    color: #4dd0ff !important;
+    border: 2px solid rgba(77, 208, 255, 0.5) !important;
+    box-shadow: none !important;
+    padding: 11px 28px !important;
+    font-size: 11px !important;
+  }
+  .share-btn:hover {
+    background: rgba(77, 208, 255, 0.25) !important;
+    box-shadow: 0 0 14px rgba(77, 208, 255, 0.4) !important;
+  }
 
   /* Ship select */
   .ship-grid {
@@ -773,6 +786,7 @@
       <button class="btn secondary" id="go-lb">RANKING</button>
       <button class="btn ghost" id="go-menu">MENU</button>
     </div>
+    <button class="btn share-btn" id="go-share">📤  SHARE SCORE</button>
   </div>
 </div>
 
@@ -3487,6 +3501,79 @@ async function startGame() {
   requestAnimationFrame(loop);
 }
 
+// ==================== PROFANITY FILTER ====================
+// Common English profanity / slurs to block from callsigns. List uses substring
+// matching after leetspeak normalization (so "f4ck", "sh1t" etc. are also caught).
+const PROFANITY_LIST = [
+  // Sexual
+  'fuck','fck','fuk','phuck','shit','sht','bitch','btch','cunt','cnt',
+  'dick','cock','pussy','pussi','prick','penis','vagina','tits','boob',
+  'asshole','ahole','asshat','asswipe',
+  // Excrement
+  'crap','piss','turd',
+  // Slurs (racial / homophobic / ableist)
+  'nigger','nigga','niger','nigr','negro',
+  'faggot','faggit','fagit',
+  'retard','retarded','tard',
+  'chink','spic','kike','wetback','gook','kraut',
+  'tranny','dyke',
+  // Misogyny
+  'whore','hore','slut','sluts','hoebag',
+  // Hate
+  'nazi','hitler','kkk',
+  // Sexual acts / body
+  'jizz','cum','semen','anal','blowjob','handjob','rimjob',
+  'orgasm','masturbat',
+  // Other
+  'bastard','douche','wanker','twat','fanny',
+];
+
+function normalizeForProfanity(s) {
+  return s.toLowerCase()
+    .replace(/[0]/g, 'o')
+    .replace(/[1!|]/g, 'i')
+    .replace(/[3]/g, 'e')
+    .replace(/[4@]/g, 'a')
+    .replace(/[5$]/g, 's')
+    .replace(/[7]/g, 't')
+    .replace(/[\s\-_.,]/g, '');
+}
+
+function containsProfanity(name) {
+  const n = normalizeForProfanity(name);
+  return PROFANITY_LIST.some(w => n.includes(w));
+}
+
+// ==================== SHARE ====================
+let lastGameScore = 0;
+let lastGameDistance = 0;
+let lastGameBosses = 0;
+let lastGameRank = '?';
+
+async function shareScore() {
+  const text = lastGameRank !== '?'
+    ? `🚀 STELLAR DRIVE — I scored ${lastGameScore.toLocaleString()} points (${lastGameDistance}m, rank #${lastGameRank} today). Can you beat me?\nhttps://game.mybumo.com`
+    : `🚀 STELLAR DRIVE — I scored ${lastGameScore.toLocaleString()} points (${lastGameDistance}m). Can you beat me?\nhttps://game.mybumo.com`;
+
+  if (navigator.share) {
+    try {
+      await navigator.share({
+        title: 'STELLAR DRIVE',
+        text: text,
+        url: 'https://game.mybumo.com',
+      });
+      return;
+    } catch (e) {
+      // User cancelled — silently exit
+      if (e && e.name === 'AbortError') return;
+    }
+  }
+  // Fallback for desktop / browsers without Web Share API
+  const subject = encodeURIComponent('Beat my STELLAR DRIVE score!');
+  const body = encodeURIComponent(text);
+  window.location.href = `mailto:?subject=${subject}&body=${body}`;
+}
+
 async function showGameOver() {
   const finalScore = S.score;
   const finalDistance = Math.floor(S.distance);
@@ -3508,6 +3595,12 @@ async function showGameOver() {
     const myIdx = all.findIndex(e => e.name === profile?.name);
     if (myIdx >= 0) rank = (myIdx + 1).toString();
   } catch (e) {}
+
+  // Save for share button
+  lastGameScore = finalScore;
+  lastGameDistance = finalDistance;
+  lastGameBosses = bossesDefeated;
+  lastGameRank = rank;
 
   const stats = document.getElementById('go-stats');
   stats.innerHTML = `
@@ -3561,6 +3654,7 @@ document.getElementById('su-submit').addEventListener('click', async () => {
   const errEl = document.getElementById('su-err');
   errEl.textContent = '';
   if (name.length < 2) { errEl.textContent = 'Callsign must be at least 2 characters'; return; }
+  if (containsProfanity(name)) { errEl.textContent = 'Please choose a different callsign'; return; }
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { errEl.textContent = 'Please enter a valid email address'; return; }
   profile = { name, email, bestScore: 0, bestDistance: 0, createdAt: Date.now() };
   await saveProfile(profile);
@@ -3604,6 +3698,10 @@ document.getElementById('lb-back').addEventListener('click', () => {
 document.getElementById('go-retry').addEventListener('click', () => startGame());
 document.getElementById('go-lb').addEventListener('click', () => showLeaderboard('daily'));
 document.getElementById('go-menu').addEventListener('click', showMenu);
+document.getElementById('go-share').addEventListener('pointerdown', e => {
+  e.stopPropagation();
+  shareScore();
+});
 
 // ==================== BOOT ====================
 async function boot() {
