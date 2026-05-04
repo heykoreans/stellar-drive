@@ -985,35 +985,74 @@ async function submitScore(profile, score, distance, bossesDefeated = 0) {
 }
 
 // period = 'daily' | 'weekly' | 'alltime'
-async function getLeaderboard(limit = 20, period = 'alltime') {
-  const client = sb();
-  const viewName = {
-    daily: 'stellar_leaderboard_daily',
-    weekly: 'stellar_leaderboard_weekly',
+// Simple in-memory cache to avoid repeated Supabase round-trips
+const _lbCache = {
+  daily:   { data: null, ts: 0, inflight: null },
+  weekly:  { data: null, ts: 0, inflight: null },
+  alltime: { data: null, ts: 0, inflight: null },
+};
+const LB_CACHE_TTL = 15000; // ms
+
+function _viewName(period) {
+  return {
+    daily:   'stellar_leaderboard_daily',
+    weekly:  'stellar_leaderboard_weekly',
     alltime: 'stellar_leaderboard_alltime',
   }[period] || 'stellar_leaderboard_alltime';
+}
 
-  if (client) {
-    try {
-      const { data, error } = await client
-        .from(viewName)
-        .select('name, best_score, best_distance, updated_at')
-        .order('best_score', { ascending: false })
-        .limit(limit);
-      if (!error && data) {
-        return data.map(r => ({
-          name: r.name,
-          score: r.best_score,
-          distance: r.best_distance,
-          _key: r.name,
-        }));
-      }
-    } catch (e) { console.warn('Leaderboard failed:', e.message); }
+async function _fetchLeaderboardFresh(limit, period) {
+  const client = sb();
+  if (!client) return null;
+  try {
+    const { data, error } = await client
+      .from(_viewName(period))
+      .select('name, best_score, best_distance, updated_at')
+      .order('best_score', { ascending: false })
+      .limit(limit);
+    if (error || !data) return null;
+    return data.map(r => ({
+      name: r.name, score: r.best_score, distance: r.best_distance, _key: r.name,
+    }));
+  } catch (e) { console.warn('Leaderboard fetch failed:', e.message); return null; }
+}
+
+// Returns { data, fresh } where fresh=true if from network, false if from cache
+async function getLeaderboardCached(limit = 20, period = 'alltime') {
+  const slot = _lbCache[period] || _lbCache.alltime;
+  const now = Date.now();
+  const fresh = slot.data && (now - slot.ts) < LB_CACHE_TTL;
+  if (fresh) return { data: slot.data, fresh: false };
+
+  // De-dupe in-flight requests
+  if (!slot.inflight) {
+    slot.inflight = _fetchLeaderboardFresh(limit, period).then(d => {
+      if (d) { slot.data = d; slot.ts = Date.now(); }
+      slot.inflight = null;
+      return d;
+    });
   }
-  if (profile) {
-    return [{ name: profile.name, score: profile.bestScore || 0, distance: profile.bestDistance || 0, _key: profile.name }];
-  }
-  return [];
+  const data = await slot.inflight;
+  if (data) return { data, fresh: true };
+  // Fallback to stale (any age) or local
+  if (slot.data) return { data: slot.data, fresh: false };
+  if (profile) return { data: [{ name: profile.name, score: profile.bestScore || 0, distance: profile.bestDistance || 0, _key: profile.name }], fresh: false };
+  return { data: [], fresh: false };
+}
+
+// Backward-compatible wrapper used by existing call sites
+async function getLeaderboard(limit = 20, period = 'alltime') {
+  const { data } = await getLeaderboardCached(limit, period);
+  return data;
+}
+
+// Fire-and-forget warm cache (used after game over)
+function preloadLeaderboards() {
+  ['daily', 'weekly', 'alltime'].forEach(p => {
+    const slot = _lbCache[p];
+    slot.ts = 0; // force refresh
+    getLeaderboardCached(20, p);
+  });
 }
 
 // ==================== CANVAS / INPUT ====================
@@ -1120,6 +1159,10 @@ function newState() {
       fireTimer: 0.5 + i * 0.2,
       element: i === 0 ? 'frost' : 'bolt',
       offsetX: offset,
+      // v0.8 additions
+      disabled: 0,        // > 0 = pet disabled (hit timer in seconds)
+      level: 0,           // 0..3, raised at distance milestones
+      levelUpFlash: 0,    // brief glow on level up
     });
   }
   for (let i = 0; i < 80; i++) {
@@ -1370,12 +1413,27 @@ function fire() {
 }
 
 function petFire(pet) {
-  const el = pet.element;
-  S.bullets.push({
+  // Pet element matches the player's current weapon — gives access to all 3 abilities
+  const el = S.weapon || pet.element;
+  pet.element = el; // sync for visual
+
+  const bullet = {
     x: pet.x, y: pet.y - 10, vy: -480, dmg: 1,
     element: el, color: ELEMENTS[el].color,
     fromPet: true,
-  });
+    petLevel: pet.level,
+  };
+
+  // BOLT pet: chance for homing shot (scales with level: 25% / 35% / 45% / 55%)
+  if (el === 'bolt') {
+    const homingChance = 0.25 + pet.level * 0.10;
+    if (Math.random() < homingChance) {
+      bullet.homing = true;
+      bullet.vx = 0;
+    }
+  }
+
+  S.bullets.push(bullet);
   audio.beep({ type: 'sine', f1: 1400, f2: 700, dur: 0.04, vol: 0.07 });
 }
 
@@ -1659,15 +1717,96 @@ function update(dt) {
   }
   S.ship.x = Math.max(16, Math.min(W - 16, S.ship.x));
 
+  // pet level-up check (distance-based)
+  // Level 0 (start) → Lv1 at 1500m → Lv2 at 3500m → Lv3 at 6000m
+  const distNow = S.distance;
+  const targetLv = distNow >= 6000 ? 3 : distNow >= 3500 ? 2 : distNow >= 1500 ? 1 : 0;
+
   // pets follow ship (multi-pet support)
   for (const pet of S.pets) {
+    // Disabled state countdown
+    if (pet.disabled > 0) {
+      pet.disabled -= dt;
+      if (pet.disabled < 0) {
+        pet.disabled = 0;
+        spawnParticles(pet.x, pet.y, '#9be7ff', 12, 140);
+        spawnPopup(pet.x, pet.y - 12, 'PET BACK', '#9be7ff', false);
+      }
+    }
+    if (pet.levelUpFlash > 0) pet.levelUpFlash -= dt;
+
+    // Level-up trigger
+    if (pet.level < targetLv) {
+      pet.level = targetLv;
+      pet.levelUpFlash = 0.8;
+      spawnParticles(pet.x, pet.y, '#ffeb3b', 18, 200);
+      spawnPopup(pet.x, pet.y - 16, 'PET LV ' + pet.level + '!', '#ffeb3b', true);
+      audio.beep({ type: 'square', f1: 800, f2: 1600, dur: 0.18, vol: 0.14 });
+    }
+
+    // Position follow
     const petTargetX = S.ship.x + pet.offsetX;
     const petTargetY = S.ship.y + 14;
     pet.x += (petTargetX - pet.x) * Math.min(1, dt * 6);
     pet.y += (petTargetY - pet.y) * Math.min(1, dt * 6);
     pet.x = Math.max(12, Math.min(W - 12, pet.x));
+
+    // Pet doesn't fire when disabled
+    if (pet.disabled > 0) continue;
+
+    // Fire (rate scales with level: 0.45 → 0.36 → 0.28 → 0.22)
     pet.fireTimer -= dt;
-    if (pet.fireTimer <= 0) { petFire(pet); pet.fireTimer = 0.45; }
+    if (pet.fireTimer <= 0) {
+      petFire(pet);
+      const baseRate = 0.45;
+      const lvMul = [1.0, 0.80, 0.62, 0.48][pet.level] || 1.0;
+      pet.fireTimer = baseRate * lvMul;
+    }
+
+    // FROST passive aura: slow nearby enemy bullets (only when current weapon is FROST)
+    if (S.weapon === 'frost') {
+      const auraR = 38 + pet.level * 6;
+      const auraR2 = auraR * auraR;
+      for (const eb of S.enemyBullets) {
+        if (eb.frozenByPet) continue;
+        if (dist2(eb.x, eb.y, pet.x, pet.y) < auraR2) {
+          eb.vy *= 0.45;
+          if (eb.vx) eb.vx *= 0.45;
+          eb.frozenByPet = true;
+          // tiny visual hint
+          spawnParticles(eb.x, eb.y, '#9be7ff', 2, 60);
+        }
+      }
+    }
+
+    // Crystal magnet aura — crystals near pet drift toward ship
+    const magR = 50 + pet.level * 8;
+    const magR2 = magR * magR;
+    for (const p of S.pickups) {
+      if (p.type !== 'crystal') continue;
+      if (dist2(p.x, p.y, pet.x, pet.y) < magR2) {
+        const dx = S.ship.x - p.x, dy = S.ship.y - p.y;
+        const d = Math.sqrt(dx*dx + dy*dy) + 0.01;
+        p.vx += (dx/d) * 320 * dt;
+        p.vy += (dy/d) * 320 * dt;
+      }
+    }
+
+    // Pet bullet collision — pet blocks enemy bullets
+    for (let i = S.enemyBullets.length - 1; i >= 0; i--) {
+      const eb = S.enemyBullets[i];
+      const r = (eb.r || 5) + 11; // pet radius ~9 + bullet radius
+      if (dist2(eb.x, eb.y, pet.x, pet.y) < r * r) {
+        // hit: destroy bullet, deactivate pet 2s
+        S.enemyBullets.splice(i, 1);
+        pet.disabled = 2.0;
+        spawnParticles(pet.x, pet.y, ELEMENTS[pet.element].color, 14, 160);
+        spawnParticles(pet.x, pet.y, '#ff6b35', 10, 140);
+        audio.beep({ type: 'square', f1: 400, f2: 100, dur: 0.12, vol: 0.15 });
+        spawnPopup(pet.x, pet.y - 14, 'BLOCKED!', '#ff8a4d', false);
+        break; // one hit per frame is enough
+      }
+    }
   }
 
   // distance
@@ -1705,8 +1844,36 @@ function update(dt) {
   // bullets
   for (let i = S.bullets.length - 1; i >= 0; i--) {
     const b = S.bullets[i];
+
+    // Homing pet bullets (BOLT pet special)
+    if (b.homing) {
+      // find nearest enemy
+      let target = null, bestD = 250 * 250;
+      for (const e of S.enemies) {
+        const d = dist2(b.x, b.y, e.x, e.y);
+        if (d < bestD) { bestD = d; target = e; }
+      }
+      if (target) {
+        const dx = target.x - b.x, dy = target.y - b.y;
+        const d = Math.sqrt(dx*dx + dy*dy) + 0.01;
+        const desired = Math.atan2(dy, dx);
+        const current = Math.atan2(b.vy, b.vx || 0);
+        let diff = desired - current;
+        while (diff > Math.PI) diff -= 2*Math.PI;
+        while (diff < -Math.PI) diff += 2*Math.PI;
+        const turn = 5.5 * dt;
+        const newA = current + Math.sign(diff) * Math.min(Math.abs(diff), turn);
+        const speed = 520;
+        b.vx = Math.cos(newA) * speed;
+        b.vy = Math.sin(newA) * speed;
+      }
+      b.x += (b.vx || 0) * dt;
+    } else if (b.vx) {
+      b.x += b.vx * dt;
+    }
+
     b.y += b.vy * dt;
-    if (b.y < -10) S.bullets.splice(i, 1);
+    if (b.y < -10 || b.y > H + 20 || b.x < -20 || b.x > W + 20) S.bullets.splice(i, 1);
   }
 
   // enemy bullets
@@ -1800,6 +1967,28 @@ function update(dt) {
       if (Math.abs(b.x - e.x) < e.size && Math.abs(b.y - e.y) < e.size) {
         if (b.hitIds) b.hitIds.push(e);
         const killed = damageEnemy(e, b.dmg, S.ship.y, b.element);
+
+        // FLAME pet: small AoE explosion on kill (lighter than weapon AoE)
+        if (b.fromPet && b.element === 'flame' && killed) {
+          const cx = e.x, cy = e.y;
+          const petLv = b.petLevel || 0;
+          const petAoeR = 30 + petLv * 6;   // smaller than weapon's
+          const petAoeDmg = 0.5 + petLv * 0.15;
+          S.aoeRings.push({ x: cx, y: cy, r: 0, maxR: petAoeR * 1.3, life: 0.24, maxLife: 0.24, color: '#ff6b35' });
+          spawnParticles(cx, cy, '#ff8a4d', 6, 130);
+          const r2 = petAoeR * petAoeR;
+          for (let k = S.enemies.length - 1; k >= 0; k--) {
+            if (S.enemies[k] === e) continue;
+            const e2 = S.enemies[k];
+            if (dist2(cx, cy, e2.x, e2.y) < r2) {
+              const k2 = damageEnemy(e2, b.dmg * petAoeDmg, S.ship.y, 'flame');
+              if (k2) {
+                S.enemies.splice(k, 1);
+                if (k < i) i--;
+              }
+            }
+          }
+        }
 
         // FLAME: splash damage to nearby enemies
         if (b._kind === 'flame' && WEAPON_CONFIGS.flame.aoeRadius > 0) {
@@ -2535,19 +2724,75 @@ function drawBeam() {
 }
 
 function drawPet() {
+  const t = Date.now() / 1000;
   for (const p of S.pets) {
     ctx.save();
     ctx.translate(p.x, p.y);
     const el = ELEMENTS[p.element];
-    ctx.shadowColor = el.glow; ctx.shadowBlur = 10;
+
+    // Disabled state — gray out, no glow, drift sparkle
+    if (p.disabled > 0) {
+      const fadeIn = Math.min(1, p.disabled / 0.3);
+      ctx.globalAlpha = 0.35 + Math.sin(t * 12) * 0.1;
+      ctx.fillStyle = '#555a66';
+      ctx.beginPath(); ctx.arc(0, 0, 8, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#222';
+      ctx.beginPath(); ctx.arc(0, 0, 4.5, 0, Math.PI * 2); ctx.fill();
+      // crack effect
+      ctx.strokeStyle = 'rgba(255,107,53,' + fadeIn + ')';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(-5, -3); ctx.lineTo(2, 1); ctx.lineTo(-1, 4); ctx.stroke();
+      ctx.globalAlpha = 1;
+      ctx.restore();
+      continue;
+    }
+
+    // Level-up flash glow
+    if (p.levelUpFlash > 0) {
+      const a = p.levelUpFlash / 0.8;
+      ctx.shadowColor = '#ffeb3b'; ctx.shadowBlur = 22 * a;
+      ctx.strokeStyle = `rgba(255, 235, 59, ${a})`;
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(0, 0, 12 + (1-a) * 18, 0, Math.PI * 2); ctx.stroke();
+    }
+
+    // Pulse glow when active
+    const pulse = 1 + Math.sin(t * 4) * 0.15;
+    ctx.shadowColor = el.glow; ctx.shadowBlur = 14 * pulse;
+
+    // Outer body (bigger than before: 7→9)
     ctx.fillStyle = '#bbcfe6';
-    ctx.beginPath(); ctx.arc(0, 0, 7, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(0, 0, 9, 0, Math.PI * 2); ctx.fill();
+
+    // Inner element core (4→5)
     ctx.fillStyle = el.color;
-    ctx.beginPath(); ctx.arc(0, 0, 4, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = '#bbcfe6';
-    ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(0, -7); ctx.lineTo(0, -10); ctx.stroke();
+    ctx.beginPath(); ctx.arc(0, 0, 5, 0, Math.PI * 2); ctx.fill();
+
+    // Highlight dot (face)
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    ctx.beginPath(); ctx.arc(-1.5, -1.5, 1.4, 0, Math.PI * 2); ctx.fill();
+
+    // Antenna
     ctx.shadowBlur = 0;
+    ctx.strokeStyle = '#bbcfe6';
+    ctx.lineWidth = 1.4;
+    ctx.beginPath(); ctx.moveTo(0, -9); ctx.lineTo(0, -13); ctx.stroke();
+    ctx.fillStyle = el.color;
+    ctx.beginPath(); ctx.arc(0, -14, 1.3, 0, Math.PI * 2); ctx.fill();
+
+    // Level indicator — small dots above pet (one per level)
+    if (p.level > 0) {
+      ctx.shadowColor = '#ffeb3b'; ctx.shadowBlur = 4;
+      ctx.fillStyle = '#ffeb3b';
+      const totalW = (p.level - 1) * 4;
+      for (let k = 0; k < p.level; k++) {
+        ctx.beginPath();
+        ctx.arc(-totalW/2 + k * 4, -19, 1.2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.shadowBlur = 0;
+    }
+
     ctx.restore();
   }
 }
@@ -2919,23 +3164,18 @@ async function showMenu() {
   document.getElementById('menu-name').textContent = profile.name;
   document.getElementById('menu-best').textContent = (profile.bestScore || 0).toLocaleString();
   showScreen('menu-screen');
+  // Warm cache so RANKING button is instant
+  preloadLeaderboards();
 }
 let currentLbPeriod = 'daily';
+let _lbRenderToken = 0;
 
-async function showLeaderboard(period) {
-  if (period) currentLbPeriod = period;
-  showScreen('lb-screen');
-  // Update tab UI
-  document.querySelectorAll('.lb-tab').forEach(b => {
-    b.classList.toggle('active', b.dataset.period === currentLbPeriod);
-  });
+function _renderLeaderboard(entries, period) {
   const list = document.getElementById('lb-list');
-  list.innerHTML = '<li class="lb-empty">Loading...</li>';
-  const entries = await getLeaderboard(20, currentLbPeriod);
   if (entries.length === 0) {
-    const emptyMsg = currentLbPeriod === 'daily'
+    const emptyMsg = period === 'daily'
       ? 'No records today yet.<br>Be the first pilot of the day!'
-      : currentLbPeriod === 'weekly'
+      : period === 'weekly'
       ? 'No records this week yet.<br>Be the first pilot of the week!'
       : 'No records yet.<br>Be the first pilot!';
     list.innerHTML = `<li class="lb-empty">${emptyMsg}</li>`;
@@ -2958,6 +3198,32 @@ async function showLeaderboard(period) {
     `;
     list.appendChild(li);
   });
+}
+
+async function showLeaderboard(period) {
+  if (period) currentLbPeriod = period;
+  showScreen('lb-screen');
+  document.querySelectorAll('.lb-tab').forEach(b => {
+    b.classList.toggle('active', b.dataset.period === currentLbPeriod);
+  });
+
+  const list = document.getElementById('lb-list');
+  const myToken = ++_lbRenderToken;
+
+  // Render cached immediately (if any)
+  const slot = _lbCache[currentLbPeriod];
+  if (slot && slot.data) {
+    _renderLeaderboard(slot.data, currentLbPeriod);
+  } else {
+    list.innerHTML = '<li class="lb-empty">Loading...</li>';
+  }
+
+  // Fetch fresh in background
+  const { data } = await getLeaderboardCached(20, currentLbPeriod);
+  // Only render if user hasn't switched tab in the meantime
+  if (myToken === _lbRenderToken) {
+    _renderLeaderboard(data, currentLbPeriod);
+  }
 }
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c => ({
@@ -2994,6 +3260,9 @@ async function showGameOver() {
     const result = await submitScore(profile, finalScore, finalDistance, bossesDefeated);
     if (result && result.newRecord && finalScore > prevBest) newRecord = true;
   }
+
+  // Preload all 3 leaderboard tabs in parallel — RANKING tap will be instant
+  preloadLeaderboards();
 
   // Rank in today's leaderboard (more engaging than all-time)
   let rank = '?';
