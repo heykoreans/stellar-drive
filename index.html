@@ -270,6 +270,55 @@
     font-size: 10px; letter-spacing: 3px; opacity: 0.5;
     color: #F4ECE3;
   }
+  .volume-controls {
+    display: flex; flex-direction: column; gap: 12px;
+    width: 100%; max-width: 280px;
+    margin-top: 6px;
+    padding: 14px 18px;
+    background: rgba(10, 25, 60, 0.5);
+    border: 1px solid rgba(77, 208, 255, 0.25);
+    border-radius: 10px;
+  }
+  .volume-row {
+    display: flex; align-items: center; gap: 10px;
+  }
+  .volume-label {
+    font-size: 10px; font-weight: 700; letter-spacing: 1.5px;
+    color: rgba(220, 232, 245, 0.85);
+    min-width: 70px;
+  }
+  .volume-slider {
+    flex: 1;
+    -webkit-appearance: none; appearance: none;
+    height: 4px;
+    background: rgba(77, 208, 255, 0.25);
+    border-radius: 2px;
+    outline: none;
+    cursor: pointer;
+  }
+  .volume-slider::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 16px; height: 16px;
+    background: #4dd0ff;
+    border-radius: 50%;
+    cursor: pointer;
+    box-shadow: 0 0 6px rgba(77, 208, 255, 0.5);
+  }
+  .volume-slider::-moz-range-thumb {
+    width: 16px; height: 16px;
+    background: #4dd0ff;
+    border-radius: 50%;
+    cursor: pointer;
+    border: none;
+    box-shadow: 0 0 6px rgba(77, 208, 255, 0.5);
+  }
+  .volume-val {
+    font-size: 11px; font-weight: 700;
+    color: #4dd0ff;
+    min-width: 26px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
   .pause-btns {
     display: flex; flex-direction: column; gap: 10px;
     align-items: center; margin-top: 8px;
@@ -747,6 +796,18 @@
   <div id="pause-overlay">
     <div class="pause-title">PAUSED</div>
     <div class="pause-sub">MISSION SUSPENDED</div>
+    <div class="volume-controls">
+      <div class="volume-row">
+        <label class="volume-label">🎵 MUSIC</label>
+        <input type="range" id="vol-bgm" class="volume-slider" min="0" max="100" value="55">
+        <span class="volume-val" id="vol-bgm-val">55</span>
+      </div>
+      <div class="volume-row">
+        <label class="volume-label">🔊 EFFECTS</label>
+        <input type="range" id="vol-sfx" class="volume-slider" min="0" max="100" value="70">
+        <span class="volume-val" id="vol-sfx-val">70</span>
+      </div>
+    </div>
     <div class="pause-btns">
       <button id="pause-resume" class="pause-btn primary">▶  RESUME</button>
       <button id="pause-home" class="pause-btn">⌂  HOME</button>
@@ -977,7 +1038,11 @@ const WEAPON_CONFIGS = {
 // ==================== AUDIO ====================
 const audio = {
   ctx: null, master: null, sfx: null, music: null,
-  muted: false, musicPlaying: false, musicTimer: null,
+  muted: false, musicPlaying: false,
+  bgmEl: null, bgmReady: false,
+  bgmVolume: 0.55,  // 0..1
+  sfxVolume: 0.7,   // 0..1
+  BGM_URL: 'https://game.mybumo.com/Starlight.mp3',
 
   init() {
     if (this.ctx) return;
@@ -987,11 +1052,23 @@ const audio = {
       this.master.gain.value = this.muted ? 0 : 0.85;
       this.master.connect(this.ctx.destination);
       this.sfx = this.ctx.createGain();
-      this.sfx.gain.value = 0.7;
+      this.sfx.gain.value = this.sfxVolume;
       this.sfx.connect(this.master);
       this.music = this.ctx.createGain();
       this.music.gain.value = 0.45;
       this.music.connect(this.master);
+
+      // BGM via HTMLAudioElement (lighter than decoded buffer for long loops)
+      this.bgmEl = new Audio();
+      this.bgmEl.src = this.BGM_URL;
+      this.bgmEl.loop = true;
+      this.bgmEl.preload = 'auto';
+      this.bgmEl.volume = this.muted ? 0 : this.bgmVolume;
+      this.bgmEl.addEventListener('canplaythrough', () => { this.bgmReady = true; });
+      this.bgmEl.addEventListener('error', (e) => {
+        console.warn('BGM failed to load — game continues without music');
+        this.bgmReady = false;
+      });
     } catch (e) { console.warn('Audio init failed', e); }
   },
 
@@ -1073,87 +1150,80 @@ const audio = {
   testPing() { this.beep({ type: 'sine', f1: 660, f2: 880, dur: 0.15, vol: 0.18 }); },
 
   startMusic() {
-    if (this.musicPlaying || !this.ctx) return;
+    if (!this.bgmEl || this.musicPlaying) return;
     this.musicPlaying = true;
-    this.musicLoop();
+    if (this.muted) return;
+    const playPromise = this.bgmEl.play();
+    if (playPromise) {
+      playPromise.catch(e => {
+        // Auto-play blocked — will play on next user interaction
+        console.warn('BGM autoplay blocked:', e.message);
+      });
+    }
   },
   stopMusic() {
     this.musicPlaying = false;
-    if (this.musicTimer) { clearTimeout(this.musicTimer); this.musicTimer = null; }
-  },
-  musicLoop() {
-    if (!this.musicPlaying || !this.ctx) return;
-    const t = this.ctx.currentTime + 0.05;
-    const barDur = 2.0;
-    const chords = [
-      [110, 220, 261.63, 329.63],   // Am
-      [87.31, 174.61, 220, 261.63], // F
-      [130.81, 196, 261.63, 329.63],// C
-      [98, 196, 246.94, 293.66],    // G
-    ];
-    for (let i = 0; i < chords.length; i++) {
-      this.playChordPad(chords[i], t + i * barDur, barDur);
+    if (this.bgmEl) {
+      this.bgmEl.pause();
+      this.bgmEl.currentTime = 0;
     }
-    this.musicTimer = setTimeout(() => this.musicLoop(), chords.length * barDur * 1000 - 80);
   },
-  playChordPad(freqs, start, dur) {
-    if (!this.ctx) return;
-    for (const freq of freqs) {
-      const sine = this.ctx.createOscillator();
-      const sineG = this.ctx.createGain();
-      sine.type = 'sine';
-      sine.frequency.value = freq;
-      sineG.gain.setValueAtTime(0, start);
-      sineG.gain.linearRampToValueAtTime(0.06, start + 0.4);
-      sineG.gain.setValueAtTime(0.06, start + dur - 0.4);
-      sineG.gain.linearRampToValueAtTime(0, start + dur);
-      sine.connect(sineG).connect(this.music);
-      sine.start(start); sine.stop(start + dur + 0.01);
-
-      const saw = this.ctx.createOscillator();
-      const sawG = this.ctx.createGain();
-      const filter = this.ctx.createBiquadFilter();
-      saw.type = 'sawtooth';
-      saw.frequency.value = freq * 1.005;
-      filter.type = 'lowpass';
-      filter.frequency.value = 700;
-      filter.Q.value = 1;
-      sawG.gain.setValueAtTime(0, start);
-      sawG.gain.linearRampToValueAtTime(0.025, start + 0.4);
-      sawG.gain.setValueAtTime(0.025, start + dur - 0.4);
-      sawG.gain.linearRampToValueAtTime(0, start + dur);
-      saw.connect(filter).connect(sawG).connect(this.music);
-      saw.start(start); saw.stop(start + dur + 0.01);
+  pauseMusic() {
+    if (this.bgmEl) this.bgmEl.pause();
+  },
+  resumeMusic() {
+    if (this.bgmEl && this.musicPlaying && !this.muted) {
+      this.bgmEl.play().catch(() => {});
     }
-    const bass = this.ctx.createOscillator();
-    const bassG = this.ctx.createGain();
-    bass.type = 'triangle';
-    bass.frequency.value = freqs[0] / 2;
-    bassG.gain.setValueAtTime(0, start);
-    bassG.gain.linearRampToValueAtTime(0.11, start + 0.05);
-    bassG.gain.setValueAtTime(0.11, start + dur - 0.2);
-    bassG.gain.linearRampToValueAtTime(0, start + dur);
-    bass.connect(bassG).connect(this.music);
-    bass.start(start); bass.stop(start + dur + 0.01);
-    // pulse
-    const t1 = start + dur * 0.5;
-    const bass2 = this.ctx.createOscillator();
-    const bass2G = this.ctx.createGain();
-    bass2.type = 'triangle';
-    bass2.frequency.value = freqs[0] / 2;
-    bass2G.gain.setValueAtTime(0, t1);
-    bass2G.gain.linearRampToValueAtTime(0.08, t1 + 0.03);
-    bass2G.gain.linearRampToValueAtTime(0, t1 + dur * 0.5 - 0.05);
-    bass2.connect(bass2G).connect(this.music);
-    bass2.start(t1); bass2.stop(t1 + dur * 0.5 + 0.01);
   },
-
-  toggle() {
-    this.muted = !this.muted;
+  setBGMVolume(v) {
+    this.bgmVolume = Math.max(0, Math.min(1, v));
+    if (this.bgmEl) this.bgmEl.volume = this.muted ? 0 : this.bgmVolume;
+    saveAudioPrefs();
+  },
+  setSFXVolume(v) {
+    this.sfxVolume = Math.max(0, Math.min(1, v));
+    if (this.sfx) this.sfx.gain.value = this.sfxVolume;
+    saveAudioPrefs();
+  },
+  setMuted(m) {
+    this.muted = !!m;
     if (this.master) this.master.gain.value = this.muted ? 0 : 0.85;
+    if (this.bgmEl) {
+      this.bgmEl.volume = this.muted ? 0 : this.bgmVolume;
+      if (this.muted) {
+        this.bgmEl.pause();
+      } else if (this.musicPlaying) {
+        this.bgmEl.play().catch(() => {});
+      }
+    }
+    saveAudioPrefs();
+  },
+  toggle() {
+    this.setMuted(!this.muted);
     return this.muted;
   },
 };
+
+// localStorage helpers for audio prefs (defined after profile load)
+function saveAudioPrefs() {
+  try {
+    localStorage.setItem('stellar_audio', JSON.stringify({
+      muted: audio.muted,
+      bgmVolume: audio.bgmVolume,
+      sfxVolume: audio.sfxVolume,
+    }));
+  } catch (e) {}
+}
+function loadAudioPrefs() {
+  try {
+    const saved = JSON.parse(localStorage.getItem('stellar_audio') || '{}');
+    if (typeof saved.muted === 'boolean') audio.muted = saved.muted;
+    if (typeof saved.bgmVolume === 'number') audio.bgmVolume = saved.bgmVolume;
+    if (typeof saved.sfxVolume === 'number') audio.sfxVolume = saved.sfxVolume;
+  } catch (e) {}
+}
+loadAudioPrefs();
 
 // ==================== STORAGE ====================
 // ==================== SUPABASE CONFIG ====================
@@ -3489,11 +3559,15 @@ function togglePause() {
   document.getElementById('pause-overlay').classList.toggle('active', paused);
   document.getElementById('pause-btn').textContent = paused ? '▶' : '⏸';
   if (paused) {
-    // Suspend audio context — silences all sound instantly
+    // Suspend audio context — silences all SFX instantly
     if (audio.ctx && audio.ctx.state === 'running') audio.ctx.suspend();
+    // Pause BGM (HTMLAudioElement)
+    audio.pauseMusic();
   } else {
     // Resume audio context
     if (audio.ctx && audio.ctx.state === 'suspended') audio.ctx.resume();
+    // Resume BGM
+    audio.resumeMusic();
     lastT = performance.now();
     requestAnimationFrame(loop);
   }
@@ -3789,6 +3863,37 @@ document.getElementById('sound-toggle').addEventListener('click', () => {
   const muted = audio.toggle();
   document.getElementById('sound-toggle').textContent = muted ? '✕' : '♪';
   if (!muted) audio.testPing();
+});
+
+// Initialize sound-toggle icon from saved prefs
+document.getElementById('sound-toggle').textContent = audio.muted ? '✕' : '♪';
+
+// Volume slider handlers
+const volBgmEl = document.getElementById('vol-bgm');
+const volSfxEl = document.getElementById('vol-sfx');
+const volBgmValEl = document.getElementById('vol-bgm-val');
+const volSfxValEl = document.getElementById('vol-sfx-val');
+
+// Set initial values from saved prefs
+volBgmEl.value = Math.round(audio.bgmVolume * 100);
+volSfxEl.value = Math.round(audio.sfxVolume * 100);
+volBgmValEl.textContent = volBgmEl.value;
+volSfxValEl.textContent = volSfxEl.value;
+
+volBgmEl.addEventListener('input', e => {
+  const v = parseInt(e.target.value, 10);
+  audio.setBGMVolume(v / 100);
+  volBgmValEl.textContent = v;
+});
+volSfxEl.addEventListener('input', e => {
+  const v = parseInt(e.target.value, 10);
+  audio.setSFXVolume(v / 100);
+  volSfxValEl.textContent = v;
+});
+// Prevent slider events from bubbling to body (would steer ship)
+[volBgmEl, volSfxEl].forEach(el => {
+  el.addEventListener('pointerdown', e => e.stopPropagation());
+  el.addEventListener('pointermove', e => e.stopPropagation());
 });
 
 let autoWeapon = false;
